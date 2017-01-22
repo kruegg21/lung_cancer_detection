@@ -2,8 +2,12 @@ import numpy as np # linear algebra
 import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
 import dicom
 import os
+import pylab
 import scipy.ndimage
+import time
 import matplotlib.pyplot as plt
+
+DATA_PATH = '/Volumes/My Passport for Mac/stage1/'
 
 # Timing function
 def timeit(method):
@@ -19,6 +23,16 @@ def timeit(method):
         return result
     return timed
 
+def show_slice(s):
+    """
+    Input:
+        s -- dicom slice object
+    Output:
+        plots 2-D image of slice
+    """
+    pylab.imshow(s.pixel_array, cmap=pylab.cm.bone)
+    pylab.show()
+
 @timeit
 # Load the scans in given folder path
 def load_scan(path):
@@ -32,7 +46,12 @@ def load_scan(path):
     for s in slices:
         s.SliceThickness = slice_thickness
 
-    return slices
+    print len(slices)
+    for s in slices:
+        print s.SliceThickness
+        print s.PixelSpacing
+        print '\n'
 
 if __name__ == "__main__":
-    print load_scan('/Volumes/My Passport for Mac/stage1/ff8599dd7c1139be3bad5a0351ab749a')
+    # load_scan(DATA_PATH + 'ff8599dd7c1139be3bad5a0351ab749a')
+    load_scan(DATA_PATH + '0a0c32c9e08cc2ea76a71649de56be6d')
