@@ -148,10 +148,6 @@ def resample_images(dump = True):
                 path = DATA_PATH + patient
                 with open(path + '/' + patient + '_resampled.npy', 'w+') as f:
                     np.save(f, image)
-                with open(path + '/' + patient + '_resampled.npy', 'r') as f:
-                    image = np.load(f)
-                    print image.shape
-                    show_slice(image[50])
 
 if __name__ == "__main__":
     # Basic tests
