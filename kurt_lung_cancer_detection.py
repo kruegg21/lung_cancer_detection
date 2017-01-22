@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import dicom
 import os
+import pickle
 import pylab
 import scipy.ndimage
 import time
@@ -79,7 +80,10 @@ def show_slice(s, hist_equalize = False):
         bottom is histogram equalized (increases contrast)
     """
     pylab.subplot(2, 1, 1)
-    pylab.imshow(s.pixel_array, cmap=pylab.cm.bone)
+    try:
+        pylab.imshow(s.pixel_array, cmap=pylab.cm.bone)
+    except:
+        pylab.imshow(s, cmap=pylab.cm.bone)
 
     if hist_equalize:
         pylab.subplot(2, 1, 2)
@@ -99,9 +103,25 @@ def stack_slices(slices):
     return image_3d
 
 @timeit
+def resample(image, scan, new_spacing=[1,1,1]):
+    # Determine current pixel spacing
+    spacing = map(float, ([scan[0].SliceThickness] + scan[0].PixelSpacing))
+    spacing = np.array(list(spacing))
+
+    resize_factor = spacing / new_spacing
+    new_real_shape = image.shape * resize_factor
+    new_shape = np.round(new_real_shape)
+    real_resize_factor = new_shape / image.shape
+    new_spacing = spacing / real_resize_factor
+
+    image = scipy.ndimage.interpolation.zoom(image, real_resize_factor)
+
+    return image, new_spacing
+
+@timeit
 # Load the scans in given folder path
 def load_scan(path):
-    slices = [dicom.read_file(path + '/' + s) for s in os.listdir(path)]
+    slices = [dicom.read_file(path + '/' + s) for s in os.listdir(path) if s[-3:] == 'dcm']
     slices.sort(key = lambda x: int(x.InstanceNumber))
     try:
         slice_thickness = np.abs(slices[0].ImagePositionPatient[2] - \
@@ -111,29 +131,48 @@ def load_scan(path):
 
     for s in slices:
         s.SliceThickness = slice_thickness
-        print s.PixelSpacing
 
-    print slices[0]
-    for i in dir(slices[0]):
-        print "\'{}\'".format(i)
     return slices
 
-if __name__ == "__main__":
-    # patient = '0a0c32c9e08cc2ea76a71649de56be6d'
-    # patient = 'ff8599dd7c1139be3bad5a0351ab749a'
-    # stack_slices(load_scan(DATA_PATH + patient))
-
-    number_of_slices = []
-    slice_thicknesses = []
-    pixel_spacing = []
-
-    ctr = 0
-    number_patients = len(os.listdir(DATA_PATH))
-    for patient in os.listdir(DATA_PATH):
+@timeit
+def resample_images(dump = True):
+    resampled_dimensions = []
+    for patient in os.listdir(DATA_PATH)    :
         if patient[0] != '.':
             slices = load_scan(DATA_PATH + patient)
-            slice_thicknesses.append(slices[0].SliceThickness)
-            number_of_slices.append(len(slices))
-            pixel_spacing.append(slices[0].PixelSpacing)
-        print slice_thicknesses
-        print float(ctr) / number_patients
+            image = stack_slices(slices)
+            image, new_spacing = resample(image, slices, new_spacing=[1,1,1])
+            print image.shape
+            resampled_dimensions.append(image.shape)
+            if dump:
+                path = DATA_PATH + patient
+                with open(path + '/' + patient + '_resampled.npy', 'w+') as f:
+                    np.save(f, image)
+                with open(path + '/' + patient + '_resampled.npy', 'r') as f:
+                    image = np.load(f)
+                    print image.shape
+                    show_slice(image[50])
+
+if __name__ == "__main__":
+    # Basic tests
+    # patient = '0a0c32c9e08cc2ea76a71649de56be6d'
+    # patient = 'ff8599dd7c1139be3bad5a0351ab749a'
+    # slices = load_scan(DATA_PATH + patient)
+
+    # EDA
+    # number_of_slices = []
+    # slice_thicknesses = []
+    # pixel_spacing = []
+    #
+    # ctr = 0
+    # number_patients = len(os.listdir(DATA_PATH))
+    # for patient in os.listdir(DATA_PATH):
+    #     if patient[0] != '.':
+    #         slices = load_scan(DATA_PATH + patient)
+    #         slice_thicknesses.append(slices[0].SliceThickness)
+    #         number_of_slices.append(len(slices))
+    #         pixel_spacing.append(slices[0].PixelSpacing)
+    #     print slice_thicknesses
+    #     print float(ctr) / number_patients
+
+    resample_images()
