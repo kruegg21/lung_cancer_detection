@@ -13,7 +13,7 @@ DATA_PATH = '/Volumes/My Passport for Mac/stage1/'
 
 """
 Dataset:
-1596 patients
+1595 patients
 
 Each patient is composed of a number of slices. Each slice has the following
 attributes:
@@ -83,7 +83,7 @@ def show_slice(s, hist_equalize = False):
     try:
         pylab.imshow(s.pixel_array, cmap=pylab.cm.bone)
     except:
-        pylab.imshow(s, cmap=pylab.cm.bone)
+        pylab.imshow(s, cmap=pylab.cm.autumn)
 
     if hist_equalize:
         pylab.subplot(2, 1, 2)
@@ -137,17 +137,92 @@ def load_scan(path):
 @timeit
 def resample_images(dump = True):
     resampled_dimensions = []
-    for patient in os.listdir(DATA_PATH)    :
+    for patient in os.listdir(DATA_PATH):
+        path = path = DATA_PATH + patient
         if patient[0] != '.':
-            slices = load_scan(DATA_PATH + patient)
-            image = stack_slices(slices)
-            image, new_spacing = resample(image, slices, new_spacing=[1,1,1])
-            print image.shape
-            resampled_dimensions.append(image.shape)
-            if dump:
-                path = DATA_PATH + patient
-                with open(path + '/' + patient + '_resampled.npy', 'w+') as f:
-                    np.save(f, image)
+            if not any('npy' in item for item in os.listdir(path)):
+                slices = load_scan(DATA_PATH + patient)
+                image = stack_slices(slices)
+                image, new_spacing = resample(image, slices, new_spacing=[1,1,1])
+                print image.shape
+                resampled_dimensions.append(image.shape)
+                if dump:
+                    with open(path + '/' + patient + '_resampled.npy', 'w+') as f:
+                        np.save(f, image)
+
+def BatchGenerator(batch_size = 16):
+    batch = []
+    ctr = 0
+    for patient in os.listdir(DATA_PATH):
+        path = path = DATA_PATH + patient
+        if patient[0] != '.':
+            print path + '/' + patient + '_resampled.npy'
+            with open(path + '/' + patient + '_resampled.npy', 'r') as f:
+                image = np.load(f)
+                batch.append(image)
+            ctr += 1
+        if ctr == batch_size:
+            ctr = 0
+            yield np.stack(batch)
+
+def find_dimensions():
+    patient_id = []
+    z = []
+    y = []
+    x = []
+    for patient in os.listdir(DATA_PATH):
+        path = path = DATA_PATH + patient
+        if patient[0] != '.':
+            with open(path + '/' + patient + '_resampled.npy', 'r') as f:
+                image = np.load(f)
+                patient_id.append(patient)
+                z.append(image.shape[0])
+                y.append(image.shape[1])
+                x.append(image.shape[2])
+    df = pd.DataFrame({'patient_id': patient_id, 'z': z, 'y': y, 'x': x})
+    return df
+
+def pad_dimensions():
+    patient_metadata = pd.read_csv('patient_metadata.csv')
+
+    longest_z_dimension = max(patient_metadata.z)
+    longest_x_dimension = max(patient_metadata.x)
+    longest_y_dimension = max(patient_metadata.y)
+
+    for patient in os.listdir(DATA_PATH):
+        path = path = DATA_PATH + patient
+        if patient[0] != '.':
+            with open(path + '/' + patient + '_resampled.npy', 'r') as f:
+                image = np.load(f)
+
+                # Determine how much to pad
+                z_pad = longest_z_dimension - image.shape[0]
+                x_pad = longest_x_dimension - image.shape[2]
+                y_pad = longest_y_dimension - image.shape[1]
+                padding = ((z_pad / 2, z_pad - z_pad / 2),
+                           (y_pad / 2, y_pad - y_pad / 2),
+                           (x_pad / 2, x_pad - x_pad / 2))
+
+                # Create padded image
+                image2 = np.pad(image,
+                                pad_width = padding,
+                                mode = 'constant',
+                                constant_values = 0)
+
+                # Save padded image to disk
+                with open(path + '/' + patient + '_resampled_pad.npy', 'w+') as f:
+                    np.save(f, image2)
+
+# def train_cnn():
+#     #
+#     # model = Sequential()
+#     # model.add(Convolution3D(
+#
+#     # Train in batches
+#     for e in range(nb_epoch):
+#     print("epoch %d" % e)
+#     for X_train, Y_train in BatchGenerator():
+#         model.fit(X_batch, Y_batch, batch_size=32, nb_epoch=1)
 
 if __name__ == "__main__":
     # Basic tests
@@ -170,5 +245,10 @@ if __name__ == "__main__":
     #         pixel_spacing.append(slices[0].PixelSpacing)
     #     print slice_thicknesses
     #     print float(ctr) / number_patients
+    #     ctr += 1
 
-    resample_images()
+    # Resample images
+    # resample_images()
+
+    # Test
+    pad_dimensions()
