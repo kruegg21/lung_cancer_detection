@@ -1,8 +1,12 @@
 import cv2
-import numpy as np
-import pandas as pd
 import dicom
+from keras.models import Sequential
+from keras.layers.pooling import MaxPooling3D
+from keras.layers.convolutional import Convolution3D
+from keras.layers.core import Dense, Dropout, Flatten
+import numpy as np
 import os
+import pandas as pd
 import pickle
 import pylab
 import scipy.ndimage
@@ -14,6 +18,7 @@ DATA_PATH = '/Volumes/My Passport for Mac/stage1/'
 """
 Dataset:
 1595 patients
+1397 have ground truth
 
 Each patient is composed of a number of slices. Each slice has the following
 attributes:
@@ -30,9 +35,9 @@ attributes:
 'Laterality'
 'LongitudinalTemporalInformationModified'
 'Modality'
-'PatientBirthDate'
-'PatientID'
-'PatientName'
+'PatientBirthDate' -- Jan. 1 1900 for all patients
+'PatientID' -- same as folder name
+'PatientName' -- meaningless string
 'PhotometricInterpretation'
 'PixelData'
 'PixelRepresentation'
@@ -83,6 +88,8 @@ def show_slice(s, hist_equalize = False):
     try:
         pylab.imshow(s.pixel_array, cmap=pylab.cm.bone)
     except:
+        if s.shape[2] == 1:
+            s = s.reshape((s.shape[0], s.shape[1]))
         pylab.imshow(s, cmap=pylab.cm.autumn)
 
     if hist_equalize:
@@ -150,37 +157,6 @@ def resample_images(dump = True):
                     with open(path + '/' + patient + '_resampled.npy', 'w+') as f:
                         np.save(f, image)
 
-def BatchGenerator(batch_size = 16):
-    batch = []
-    ctr = 0
-    for patient in os.listdir(DATA_PATH):
-        path = path = DATA_PATH + patient
-        if patient[0] != '.':
-            print path + '/' + patient + '_resampled.npy'
-            with open(path + '/' + patient + '_resampled.npy', 'r') as f:
-                image = np.load(f)
-                batch.append(image)
-            ctr += 1
-        if ctr == batch_size:
-            ctr = 0
-            yield np.stack(batch)
-
-def find_dimensions():
-    patient_id = []
-    z = []
-    y = []
-    x = []
-    for patient in os.listdir(DATA_PATH):
-        path = path = DATA_PATH + patient
-        if patient[0] != '.':
-            with open(path + '/' + patient + '_resampled.npy', 'r') as f:
-                image = np.load(f)
-                patient_id.append(patient)
-                z.append(image.shape[0])
-                y.append(image.shape[1])
-                x.append(image.shape[2])
-    df = pd.DataFrame({'patient_id': patient_id, 'z': z, 'y': y, 'x': x})
-    return df
 
 def pad_dimensions():
     patient_metadata = pd.read_csv('patient_metadata.csv')
@@ -213,16 +189,75 @@ def pad_dimensions():
                 with open(path + '/' + patient + '_resampled_pad.npy', 'w+') as f:
                     np.save(f, image2)
 
-# def train_cnn():
-#     #
-#     # model = Sequential()
-#     # model.add(Convolution3D(
-#
-#     # Train in batches
-#     for e in range(nb_epoch):
-#     print("epoch %d" % e)
-#     for X_train, Y_train in BatchGenerator():
-#         model.fit(X_batch, Y_batch, batch_size=32, nb_epoch=1)
+def BatchGenerator(batch_size = 4):
+    # Get metadata
+    patient_df = pd.read_csv('patient_metadata.csv')
+
+    # Get training data
+    training_patients = list(patient_df[np.isfinite(patient_df.cancer)].patient_id)
+
+    # Make batches
+    X_train_batch = []
+    y_train_batch = []
+    ctr = 0
+    for patient in training_patients:
+        path = DATA_PATH + patient
+        if patient[0] != '.':
+            if patient + '_resampled_pad.npy' in os.listdir(path + '/'):
+                with open(path + '/' + patient + '_resampled_pad.npy', 'r') as f:
+                    image = np.load(f)
+                    image = image.reshape((530, 490, 490, 1))
+                    print image.shape
+                    X_train_batch.append(image)
+                    label = int(patient_df[patient_df.patient_id == patient].cancer)
+                    y_train_batch.append(label)
+                ctr += 1
+            if ctr == batch_size:
+                ctr = 0
+                yield np.stack(X_train_batch), np.array(y_train_batch)
+
+def train_cnn():
+    parameters = {
+                    'n_epochs': 2,
+                    'nb_filters': 16,
+                    'kernal_dim1': 5,
+                    'kernal_dim2': 5,
+                    'kernal_dim3': 5,
+                    'dim_ordering': 'tf',
+                    'pool_dimensions': (2, 2, 2)
+                 }
+
+    model = Sequential()
+    model.add(Convolution3D(parameters['nb_filters'],
+                            parameters['kernal_dim1'],
+                            parameters['kernal_dim2'],
+                            parameters['kernal_dim3'],
+                            input_shape = (530, 490, 490, 1),
+                            dim_ordering = parameters['dim_ordering']))
+    print "Dimensions after first convolution layer: {}".format(model.output_shape)
+    model.add(MaxPooling3D(pool_size = parameters['pool_dimensions'],
+                           dim_ordering = parameters['dim_ordering']))
+    print "Dimensions after first pooling layer: {}".format(model.output_shape)
+    model.add(Dropout(0.5))
+    print "Dimensions after first dropout layer: {}".format(model.output_shape)
+    model.add(Flatten())
+    print "Dimensions after first flatten layer: {}".format(model.output_shape)
+    """
+    model.add(Flatten())
+    model.add(Dense(128, init='normal', activation='relu'))
+    model.add(Activation('softmax'))
+    model.compile(optimizer = 'sgd',
+                  loss = 'binary_crossentropy',
+                  metrics = ['accuracy'])
+
+    # Train in batches
+    for epoch in xrange(parameters['n_epochs']):
+        print "Epoch {}".format(epoch + 1)
+        for X_train, Y_train in BatchGenerator():
+            print X_train.shape
+            print Y_train.shape
+            model.fit(X_train, Y_train, batch_size=4, nb_epoch=1, verbose = 2)
+    """
 
 if __name__ == "__main__":
     # Basic tests
@@ -251,4 +286,6 @@ if __name__ == "__main__":
     # resample_images()
 
     # Test
-    pad_dimensions()
+    # pad_dimensions()
+
+    train_cnn()
